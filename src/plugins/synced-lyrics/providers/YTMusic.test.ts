@@ -1,10 +1,10 @@
-
 import { test, expect } from '@playwright/test';
 
-import { configureElectronTransport } from '../search/electron-transport';
-import type { SearchSongInfo } from '../types';
-
 import { YTMusic } from './YTMusic';
+
+import { configureElectronTransport } from '../search/electron-transport';
+
+import type { SearchSongInfo } from '../types';
 
 const info: SearchSongInfo = {
   title: 'Song',
