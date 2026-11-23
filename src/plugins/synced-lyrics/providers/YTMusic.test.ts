@@ -1,6 +1,8 @@
+
 import { test, expect } from '@playwright/test';
 
 import { YTMusic } from './YTMusic';
+import { configureElectronTransport } from '../search/electron-transport';
 
 import type { SearchSongInfo } from '../types';
 
@@ -16,7 +18,7 @@ const searchFixture = async (contents: unknown) => {
     globalThis,
     'document',
   );
-  const originalFetch = globalThis.fetch;
+
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
     value: {
@@ -53,21 +55,41 @@ const searchFixture = async (contents: unknown) => {
       }),
     },
   });
-  globalThis.fetch = () =>
-    Promise.resolve(new Response(JSON.stringify({ contents })));
+
+  configureElectronTransport(async (channel) => {
+    if (channel === 'synced-lyrics:cancel') return undefined;
+
+    if (channel !== 'synced-lyrics:fetch') {
+      throw new Error(`Unexpected lyrics IPC channel: ${channel}`);
+    }
+
+    return {
+      status: 200,
+      body: JSON.stringify({ contents }),
+      headers: {
+        'content-type': 'application/json',
+      },
+    };
+  });
+
   try {
     const candidates = await new YTMusic().search(info);
+
     expect(candidates[0]).toMatchObject({
       provider: 'YTMusic',
       sourceId: 'lyrics',
       exactVideoId: 'test',
     });
+
     return candidates[0]?.result;
   } finally {
-    globalThis.fetch = originalFetch;
-    if (documentDescriptor)
+    configureElectronTransport(undefined);
+
+    if (documentDescriptor) {
       Object.defineProperty(globalThis, 'document', documentDescriptor);
-    else Reflect.deleteProperty(globalThis, 'document');
+    } else {
+      Reflect.deleteProperty(globalThis, 'document');
+    }
   }
 };
 
@@ -77,7 +99,11 @@ const timedContents = (lines: unknown[]) => ({
       type: {
         componentType: {
           model: {
-            timedLyricsModel: { lyricsData: { timedLyricsData: lines } },
+            timedLyricsModel: {
+              lyricsData: {
+                timedLyricsData: lines,
+              },
+            },
           },
         },
       },
@@ -104,6 +130,7 @@ test('YTMusic preserves explicit line ends and whitespace; intro has actual inte
       },
     ]),
   );
+
   expect(result).toEqual({
     title: 'Song',
     artists: ['Artist'],
@@ -120,14 +147,24 @@ test('YTMusic preserves explicit line ends and whitespace; intro has actual inte
 test('YTMusic missing/invalid ends use next start then known duration', async () => {
   const result = await searchFixture(
     timedContents([
-      { lyricLine: '♪', cueRange: { startTimeMilliseconds: '0' } },
+      {
+        lyricLine: '♪',
+        cueRange: { startTimeMilliseconds: '0' },
+      },
       {
         lyricLine: 'Last',
-        cueRange: { startTimeMilliseconds: '4000', endTimeMilliseconds: 'NaN' },
+        cueRange: {
+          startTimeMilliseconds: '4000',
+          endTimeMilliseconds: 'NaN',
+        },
       },
-      { lyricLine: 'invalid', cueRange: { startTimeMilliseconds: 'NaN' } },
+      {
+        lyricLine: 'invalid',
+        cueRange: { startTimeMilliseconds: 'NaN' },
+      },
     ]),
   );
+
   expect(result?.lines).toEqual([
     { text: '♪', startMs: 0, endMs: 4000 },
     { text: 'Last', startMs: 4000, endMs: 10000 },
@@ -136,41 +173,67 @@ test('YTMusic missing/invalid ends use next start then known duration', async ()
 
 test('YTMusic plain lyrics remain exact and untimed', async () => {
   const result = await searchFixture({
-    messageRenderer: { text: { runs: [{ text: '  Hello\n世界  ' }] } },
+    messageRenderer: {
+      text: {
+        runs: [{ text: '  Hello\n世界  ' }],
+      },
+    },
   });
+
   expect(result?.syncLevel).toBe('plain');
   expect(result?.lyrics).toBe('  Hello\n世界  ');
   expect(result?.lines).toBeUndefined();
 });
 
 test('cancelled internal next wait settles and never starts downstream browse', async () => {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'document');
-  const originalFetch = globalThis.fetch;
+  const descriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'document',
+  );
+
   let browseCalls = 0;
+
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
     value: {
       querySelector: () => ({
-        networkManager: { fetch: () => new Promise(() => {}) },
+        networkManager: {
+          fetch: () => new Promise(() => {}),
+        },
       }),
     },
   });
-  globalThis.fetch = () => {
-    browseCalls++;
-    return Promise.resolve(new Response('{}'));
-  };
+
+  configureElectronTransport(async (channel) => {
+    if (channel === 'synced-lyrics:fetch') {
+      browseCalls++;
+    }
+
+    return undefined;
+  });
+
   try {
     const controller = new AbortController();
+
     const pending = new YTMusic().search(info, {
       signal: controller.signal,
     });
+
     await Promise.resolve();
     controller.abort();
-    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+
+    await expect(pending).rejects.toMatchObject({
+      kind: 'aborted',
+    });
+
     expect(browseCalls).toBe(0);
   } finally {
-    globalThis.fetch = originalFetch;
-    if (descriptor) Object.defineProperty(globalThis, 'document', descriptor);
-    else Reflect.deleteProperty(globalThis, 'document');
+    configureElectronTransport(undefined);
+
+    if (descriptor) {
+      Object.defineProperty(globalThis, 'document', descriptor);
+    } else {
+      Reflect.deleteProperty(globalThis, 'document');
+    }
   }
 });
