@@ -1,10 +1,10 @@
 
 import { test, expect } from '@playwright/test';
 
-import { YTMusic } from './YTMusic';
 import { configureElectronTransport } from '../search/electron-transport';
-
 import type { SearchSongInfo } from '../types';
+
+import { YTMusic } from './YTMusic';
 
 const info: SearchSongInfo = {
   title: 'Song',
@@ -56,20 +56,22 @@ const searchFixture = async (contents: unknown) => {
     },
   });
 
-  configureElectronTransport(async (channel) => {
-    if (channel === 'synced-lyrics:cancel') return undefined;
+  configureElectronTransport((channel) => {
+    if (channel === 'synced-lyrics:cancel') {
+      return Promise.resolve(undefined);
+    }
 
     if (channel !== 'synced-lyrics:fetch') {
       throw new Error(`Unexpected lyrics IPC channel: ${channel}`);
     }
 
-    return {
+    return Promise.resolve({
       status: 200,
       body: JSON.stringify({ contents }),
       headers: {
         'content-type': 'application/json',
       },
-    };
+    });
   });
 
   try {
@@ -204,12 +206,12 @@ test('cancelled internal next wait settles and never starts downstream browse', 
     },
   });
 
-  configureElectronTransport(async (channel) => {
+  configureElectronTransport((channel) => {
     if (channel === 'synced-lyrics:fetch') {
       browseCalls++;
     }
 
-    return undefined;
+    return Promise.resolve(undefined);
   });
 
   try {
