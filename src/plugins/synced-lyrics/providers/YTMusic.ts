@@ -1,6 +1,7 @@
+
 import { normalizeLines } from '../domain';
-import { bounded, lyricsHttp } from '../search/http';
 import { electronTransport } from '../search/electron-transport';
+import { bounded, lyricsHttp } from '../search/http';
 
 import type {
   LyricProvider,
